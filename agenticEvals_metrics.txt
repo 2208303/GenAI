@@ -1,0 +1,38 @@
+Agent Router Accuracy
+	
+Evaluates whether the agent selected the correct tool or skill based on the intent of the user query.Input Data: User query, selected tool, expected (ideal) tool.
+
+
+Parameter Extraction Accuracy
+	
+Validates whether the agent accurately extracted necessary parameters required by the tool without adding fabricated or missing values.Input Data: User query, tool/function JSON schema.
+
+
+Tool Execution Validity
+	
+Checks if the final function or tool call made by the agent is syntactically valid and executable.Input Data: Tool call object (tool name + parameters).
+
+
+Task Completion Rate
+	
+Measures if the agent successfully accomplished the end goal of the user based on the correctness and completeness of the final output.Input Data: User goal/intent, final output.
+
+
+Query-to-Skill Robustness
+	
+Tests the robustness of the agent in routing various phrasings of the same intent consistently to the correct tool or skill.Input Data: Set of paraphrased queries, corresponding routed tools.
+
+
+Agent Plan & Reasoning Check
+	
+Evaluates the quality and coherence of the agent’s reasoning process and whether it formed a logical and goal-directed plan.Input Data: Thought steps (reasoning trace), action plan, intermediate decisions.
+
+
+Agent Trajectory Alignment
+	
+Assesses whether the agent followed the expected or optimal path of actions/tool calls toward task completion and identifies unjustified deviations.Input Data: Actual agent trajectory (tool/action sequence), reference/expected trajectory.
+
+
+Self-Assessment Consistency
+	
+Measures the alignment between the agent’s self-evaluation (reflexion) and the actual correctness or quality of its final output.Input Data: Final output, agent's reflection or confidence statement.
