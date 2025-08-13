@@ -1,0 +1,18 @@
+phoenix_df = phoenix_df[phoenix_df["span_kind"] == "LLM"]
+    phoenix_df = phoenix_df[
+        ["attributes.llm.input_messages", "attributes.llm.output_messages"]
+    ]
+    input = phoenix_df["attributes.llm.input_messages"].tolist()
+    output = phoenix_df["attributes.llm.output_messages"].tolist()
+    prompt = Task_completion_rate_prompt.format(input,output)
+    response = client.chat.completions.create(
+        model="gpt-4o",  # Replace with your deployed model name
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=256,
+    )
+    print(response)
+    with open(r'C:\CoE\GenaiAssurance_ClaimDemoApp 2\logs\results.txt', "w", encoding="utf-8") as f:
+        f.write(f"Input_message: {input}\n")
+        f.write(f"output_message: {output}\n")
+        f.write(f"resp:{response}\n")
