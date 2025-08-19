@@ -1,0 +1,13 @@
+Task_completion_rate_prompt = """
+Evaluate Task Completion Rate
+Given the following:
+User Goal/Intent: {}
+Final Output: {}
+Please assess whether the final output fully satisfies the user's goal in terms of:
+Correctness – Is the output factually and logically accurate?
+Completeness – Does the output address all aspects of the user's goal?
+Return a structured evaluation including:
+Completion Status: (Completed / Partially Completed / Not Completed)
+Justification: Brief explanation of your assessment
+Suggestions (if any): What could be improved to better meet the goal?
+"""
