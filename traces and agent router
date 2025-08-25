@@ -1,0 +1,628 @@
+import os, re
+import json
+
+from dotenv import load_dotenv
+import pandas as pd
+from openinference.instrumentation.openai import OpenAIInstrumentor
+import uuid
+from evaluations.Metrices.parameter_extraction import parameter_extraction_prompt
+
+from evaluations.Metrices.task_completion_rate import Task_completion_rate_prompt
+from opentelemetry import trace
+
+from workflows.Health_workflow_yash import (
+    create_graph_Health_Insurance,
+)
+
+
+load_dotenv()
+
+##--
+#phoenix
+##--
+import phoenix as px
+from phoenix.otel import register
+from datetime import datetime, timedelta
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    api_key=os.environ["AZURE_OPENAI_API_KEY"],
+    api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+    azure_deployment=os.environ["AZURE_OPENAI_DEPLOYMENT_NAME"],
+    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+)
+
+# phoenix code use otel to send data to phoenix
+tracer_provider = register(
+    project_name=os.environ["phoenix_project_name"],
+    auto_instrument=True
+)
+tracer = tracer_provider.get_tracer(__name__)
+tracer = tracer_provider.get_tracer(__name__)
+
+# Generate or take from user input
+
+
+
+OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+
+print("project initiated successfully")
+
+def extract_estimated_cost(document: str) -> str:
+    """Extract estimated cost from document text using regex."""
+    match = re.search(r"Estimated repair cost:.*?₹?([\d,]+)", document, re.IGNORECASE)
+    return match.group(1).replace(",", "") if match else "unknown"
+
+
+def transform_row_to_claim_input(row: pd.Series) -> dict:
+    document = str(row.get("document", ""))
+    estimated_cost = extract_estimated_cost(document)
+    is_valid_claim = bool(row.get("is_valid_claim", False))
+    reason = str(row.get("reason", ""))
+    policy_id = str(row.get("policy_id", "UNKNOWN"))
+    # domain = str(row.get("domain", "Auto_Insurance"))
+    domain = str(row.get("domain", "Health_Insurance"))
+    rules = [f"document_verification: {reason}"] if is_valid_claim and reason else []
+
+    input_data = {
+        "policy_id": policy_id,
+        "domain": domain,
+        "document_text": document,
+        # "estimated_damage_cost": estimated_cost,
+         "estimated_treatment_cost": estimated_cost,
+        # "is_valid_claim": is_valid_claim,
+        # "reason": reason,
+        "claim_record": {
+            "name": str(row.get("name", "")),
+            "policy_id": policy_id,
+            "policy_start": str(row.get("policy_start", "")),
+            "policy_end": str(row.get("policy_end", "")),
+            "claim_type": domain,
+            # "accident_date": str(row.get("accident_date", "")),
+            "treatment_date": str(row.get("treatment_date", "")),
+            "claim_amount": float(row.get("claim_amount", 0)),
+            "notes": row.get("notes", []),
+        },
+        # "rules": rules,
+        "doc_status": None,
+        "eligibility_status": None,
+        "fraud_score": None,
+        "fraud_status": None,
+        "summary": None,
+        "decision": None,
+        "next_step_node": None,
+    }
+
+    # Convert row to dict for JSON serialization
+    row_dict = row.to_dict() if isinstance(row, pd.Series) else row
+
+    return input_data
+
+
+# workflow_map = {
+#     "Auto_Insurance": create_graph_Auto_Insurance(),
+# }
+
+
+workflow_map = {
+    "Health_Insurance": create_graph_Health_Insurance(),
+}
+
+if __name__ == "__main__":
+    input_data = {
+        "policy_id": "POL_987_HEALTH_PASS",
+        "domain": "Health_Insurance",
+        "document_text": """
+            Medical Record: Valid hospital discharge summary.
+            Patient Diagnosis: ICD-10 code J45.0 (Asthma).
+            Treatment Record: Emergency treatment on 6/26/2025 at City Hospital.
+            Medical Bills: Official bill from City Hospital for ₹2800. Estimated treatment cost: ₹2800.
+            Prescription: Valid, issued by Dr. Smith on 6/26/2025.
+            All documents appear authentic and complete.
+        """,
+        "estimated_treatment_cost": "₹2800",  # Explicitly set this for repair estimate agent_results.txt
+        # "is_valid_claim": True,
+        # "reason": "All medical documents are valid, complete, and consistent. Claim record is well-formed.",
+        "claim_record": {
+            "name": "Robert Johnson",
+            "policy_id": "POL_987_HEALTH_PASS",
+            "policy_start": "01/01/2025",
+            "policy_end": "12/31/2025",  # Use string format for dates
+            "claim_type": "Health Insurance (Major Medical Plan)",
+            "treatment_date": "06/26/2025",
+            "claim_amount": 2800.00,
+            "notes": [
+                "document_verification_agent - submitted_documents_completeness: Passed. All documents submitted and verified as authentic.",
+                # "document_verification_agent - incident_date_verification: Passed. Accident date falls within policy period",
+                "eligibility_checker_agent - policy_active_at_incident: Passed. Policy was active.",
+                "eligibility_checker_agent - coverage_matches_claim_type: Passed. Inpatient care coverage coverage applies to this claim type.",
+                # "eligibility_checker_agent - driver_eligibility: Passed. Driver's license valid and driver is authorized under policy.",
+                "eligibility_checker_agent - patient_eligibility: Passed. Patient is covered under policy.",
+                # Removed specific fraud_checker_agent notes to force LLM evaluation
+                # "fraud_checker_agent - damage_consistency: Passed. Damages in photos are fully consistent with police report and claim description. No discrepancies.",
+                # "fraud_checker_agent - repair_estimate_inconsistencies: Passed. Repair estimate of 2800 RUPEES is highly consistent with observed minor damage and typical repair costs. No overestimation.",
+                # "fraud_checker_agent - duplicate_claim_prevention: Passed. No previous claims found for this policyholder or vehicle. Unique incident.",
+                # "fraud_checker_agent - incident_veracity: Passed. Police report, driver's statement, and witness accounts are perfectly aligned. Incident details are highly credible with no suspicious elements.",
+                "fraud_checker_agent - duplicate_claim_review: Passed. No duplicate claims found for this policyholder or treatment event.",
+                "fraud_checker_agent - inconsistency_detection: Passed. Treatment details and bill of 2800 RUPEES are consistent with medical records and diagnosis.",
+                "fraud_checker_agent - provider_verification: Passed. City Hospital and Dr. Smith are verified as legitimate medical providers.",
+                "fraud_checker_agent - service_reasonability_check: Passed. Treatment is reasonable for diagnosis J45.0 inpatient care, with costs consistent with medical necessity."
+            ]
+        },
+        "rules": [
+            "document_verification: All necessary medical documents are provided and appear valid.",
+            "eligibility: Policy is active and covers the reported treatment type.",
+            "fraud_check: 'duplicate_claim_review: Check for prior submissions of identical or overlapping claims by the policyholder.'",
+            "fraud_check: 'inconsistency_detection: Treatment and bill must align with medical records and diagnosis.'",
+            "fraud_check: 'provider_verification: Verify the medical provider is licensed and recognized.'",
+            "fraud_check: 'service_reasonability_check: Treatment and cost must be reasonable for the diagnosis and medical necessity.'"
+        ],
+        "doc_status": None,  # Will be updated by the workflow
+        "eligibility_status": None,  # Will be updated by the workflow
+        "fraud_score": None,  # Will be updated by the workflow
+        "fraud_status": None,  # Will be updated by the workflow
+        "summary": None,  # Will be updated by the workflow
+        "decision": None,  # Will be updated by the workflow
+        "next_step_node": None,  # Will be updated by the workflow
+        "human_review_required": None,  # Added as per new state
+        "treatment_consistency_check_result": None,  # To be filled by agent_results.txt
+        "bill_check_result": None,  # To be filled by agent_results.txt
+        "duplicate_claim_check_result": None,  # To be filled by agent_results.txt
+        "treatment_veracity_check_result": None,  # To be filled by agent_results.txt
+        "treatment_consistency_checked": False,  # To be set by supervisor
+        "bill_checked": False,  # To be set by supervisor
+        "duplicate_claim_checked": False,  # To be set by supervisor
+        "treatment_veracity_checked": False,  # To be set by supervisor
+        "raw_llm_response": None,  # To be filled by agents
+    }
+    # run_id = str(uuid.uuid4())
+
+    # with tracer.start_as_current_span("health_insurance_workflow", attributes={"custom.run_id": run_id}):
+    #     domain = input_data.get("domain")
+    #     workflow = workflow_map[domain]  # Debug Excel input
+    #     result = workflow.invoke(input_data)
+    #     result.pop("next_step_node", None)
+    #     print("✅ Final Result:", result)
+    #     final_json = json.dumps(result, indent=2)
+    #     print("Final JSON Output:", final_json)
+
+    domain = input_data.get("domain")
+    workflow = workflow_map[domain]  # Debug Excel input
+    result = workflow.invoke(input_data)
+    result.pop("next_step_node", None)
+    print("✅ Final Result:", result)
+    final_json= json.dumps(result, indent=2)
+    print("Final JSON Output:", final_json)
+
+    ##--
+    # phoenix
+    ##--
+    px_client = px.Client()
+    start_time = datetime.now() - timedelta(minutes=300)
+    end_time = datetime.now()
+
+    phoenix_df = px_client.query_spans(
+        start_time=start_time,
+        end_time=end_time,
+        project_name=os.environ["phoenix_project_name"],
+        limit=1000,  # Limit number of spans to 100
+        root_spans_only=False,  # Only include root spans
+    )
+    phoenix_df = phoenix_df[phoenix_df["span_kind"] == "LLM"]
+    # chain_spans = phoenix_df[phoenix_df["span_kind"] == "chain"]
+    # chain_spans.to_csv("C:\\CoE\\agentic ai\\chain_spans.csv", index=False)
+    phoenix_df.to_csv("C:\\CoE\\agentic ai\\llm_spans.csv", index=False)
+    #  GET ALL THE TRACE AND SPAN IDS
+    print("pheonix data frame", phoenix_df)
+    print("Headers:", phoenix_df.columns.tolist())
+    span_ids = phoenix_df["context.span_id"].tolist()
+    trace_ids = phoenix_df["context.trace_id"].tolist()
+
+    print("Span IDs:", span_ids)
+    print("Trace IDs:", trace_ids)
+    # Group span_ids under each trace_id
+    trace_span_map = (
+        phoenix_df.groupby("context.trace_id")["context.span_id"]
+        .apply(list)
+        .to_dict()
+    )
+
+    # Pretty print
+    for trace_id, span_ids in trace_span_map.items():
+        print(f"\nTrace ID: {trace_id}")
+        print(f"Span IDs: {span_ids}")
+
+    output_file = "C:\\CoE\\agentic ai\\trace_details.txt"
+    with open(output_file, "w", encoding="utf-8") as f:
+        for trace_id in trace_ids:
+            trace_details = phoenix_df[phoenix_df["context.trace_id"] == trace_id]
+
+            f.write(f"\n=== Trace ID: {trace_id} ===\n")
+            for _, row in trace_details.iterrows():
+                f.write(f"Span ID: {row['context.span_id']}\n")
+                f.write(f"LLM Output: {row['attributes.llm.output_messages']}\n\n")
+
+    # with open(output_file, "w", encoding="utf-8") as f:
+    #     for trace_id in trace_ids:
+    #         trace_details = phoenix_df[phoenix_df["context.trace_id"] == trace_id]
+    #
+    #         f.write(f"\n=== Trace ID: {trace_id} ===\n")
+    #         for _, row in trace_details.iterrows():
+    #             f.write(f"Span ID: {row['context.span_id']}\n")
+    #             # Write relevant fields (customize based on your headers)
+    #             for col in phoenix_df.columns:
+    #                 if col not in ["context.trace_id", "context.span_id"]:
+    #                     f.write(f"{col}: {row[col]}\n")
+    #             f.write("\n")
+
+    print(f"✅ Trace details written to {output_file}")
+
+
+
+
+    input = phoenix_df["attributes.llm.input_messages"].tolist()
+    output = phoenix_df["attributes.llm.output_messages"].tolist()
+    prompt = Task_completion_rate_prompt.format(input,output)
+    response = client.chat.completions.create(
+        model="gpt-4o",  # Replace with your deployed model name
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=256,
+    )
+    print(response)
+    with open(r'C:\CoE\agentic ai\results.txt', "w", encoding="utf-8") as f:
+        f.write(f"Input_message: {input}\n")
+        f.write(f"output_message: {output}\n")
+        f.write(f"resp:{response}\n")
+
+
+
+    from opentelemetry import trace
+
+    # Extract and infer fields
+    decision = result.get("decision", "approved")
+    reason = result.get(
+        "reason",
+        "Document verification passed: All rules were either explicitly validated in the notes or compliance was inferred based on provided claim details.",
+    )
+    summary = "All required documents were provided, genuine, non-duplicate, with verified provider details and service dates, leading to claim approval."  # Inferred
+    reflection = "No explicit reflection provided; inferred that agent_results.txt reviewed document verification notes."  # Inferred
+    input_data = json.dumps(
+        result.get("claim_record", {})
+    )  # Using claim_record as input
+    output = json.dumps(
+        result.get("decision_result", {})
+    )  # Using decision_result as output
+    final_summary = summary  # Same as summary for consistency
+    agent_results = (
+        result.get("summary", "") + "\n" + json.dumps(result.get("reason", {}))
+    )  # Concatenated results
+    policy_id = result.get("policy_id", "unknown")
+
+    # Evaluation templates
+    EVAL_TEMPLATES = {
+        "decision_eval": """
+    You are evaluating the final decision made by an AI agent_results.txt for a claim.
+
+    Decision: {decision}
+    Reason: {decision_reason}
+    Summary: {summary}
+
+    Was this decision justified?
+
+    Respond in JSON:
+    {{
+    "score": <0.0 to 1.0>,
+    "decision_justified": <true/false>,
+    "justification": "<explanation>"
+    }}
+    """,
+        "reflection_eval": """
+    Evaluate the quality of this agent_results.txt's self-reflection.
+
+    Reflection: {reflection}
+    Input: {input}
+    Output: {output}
+
+    Was the reflection thoughtful and accurate?
+
+    Respond in JSON:
+    {{
+    "score": <0.0 to 1.0>,
+    "reflection_quality": "<brief comment>",
+    "reflection_valid": <true/false>
+    }}
+    """,
+        "final_call_eval": """
+    You are reviewing the overall insurance claim workflow.
+
+    Final Summary: {final_summary}
+    Agent Results: {agent_results}
+
+    Was the process consistent and complete?
+
+    Respond in JSON:
+    {{
+    "overall_score": <0.0 to 1.0>,
+    "consistent": <true/false>,
+    "comment": "<brief final assessment>"
+    }}
+    """,
+    }
+
+    # Function to evaluate a prompt with tracing
+    def evaluate_prompt(template_key, **kwargs):
+
+        with tracer.start_as_current_span(name=f"eval::{template_key}") as span:
+
+            span.set_attribute("evaluation.template", template_key)
+            span.set_attribute("claim.policy_id", kwargs.get("task", policy_id))
+
+            prompt = EVAL_TEMPLATES[template_key].format(**kwargs)
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o",  # Replace with your deployed model name
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=256,
+                )
+                result = json.loads(
+                    response.choices[0]
+                    .message.content.strip()
+                    .replace("```json", "")
+                    .replace("```", "")
+                )
+                span.set_attribute("evaluation.result", json.dumps(result))
+                return result
+
+            except Exception as e:
+
+                span.record_exception(e)
+                span.set_status(
+                    trace.Status(trace.StatusCode.ERROR, description=str(e))
+                )
+                return {"error": f"API call failed: {str(e)}"}
+
+    # Run evaluations with tracing
+    results = {
+        "decision_evaluation": evaluate_prompt(
+            "decision_eval",
+            decision=decision,
+            decision_reason=reason,
+            summary=summary,
+            task=policy_id,
+        ),
+        "reflection_evaluation": evaluate_prompt(
+            "reflection_eval",
+            reflection=reflection,
+            input=input_data,
+            output=output,
+            task=policy_id,
+        ),
+        "final_call_evaluation": evaluate_prompt(
+            "final_call_eval",
+            final_summary=final_summary,
+            agent_results=agent_results,
+            task=policy_id,
+        ),
+    }
+
+
+import re
+import json
+
+def extract_actual_route_from_notes(input_messages):
+    """
+    Extract actual workflow steps from 'notes' in user input messages.
+    Works even if Phoenix spans don't have explicit 'tool' fields.
+    """
+    route_steps = []
+    flat_messages = [msg for sublist in input_messages for msg in sublist]
+    for msg in flat_messages:
+        # Each msg is a dict like {'message.role': 'user', 'message.content': '...'}
+        content = msg.get("message.content", "")
+        # Look for "notes": [...] in the message content
+        notes_match = re.search(r'"notes":\s*(\[[^\]]*\])', content, re.DOTALL)
+        if notes_match:
+            notes_str = notes_match.group(1)
+            try:
+                # Convert single quotes to double quotes for valid JSON
+                notes_list = json.loads(notes_str.replace("'", '"'))
+                # Extract agent names as steps
+                for note in notes_list:
+                    agent_name = note.split(" - ")[0].strip()
+                    if agent_name not in route_steps:
+                        route_steps.append(agent_name)
+            except json.JSONDecodeError:
+                continue
+
+    return "\n".join(route_steps)
+
+# Phoenix input messages (flattened list of lists)
+user_input_list = phoenix_df["attributes.llm.input_messages"].tolist()
+
+print("user input str",user_input_list)
+
+# Extract the actual route taken
+actual_route_str = extract_actual_route_from_notes(user_input_list)
+# print("user input str",actual_route_str)
+print("Actual Route Taken:\n", actual_route_str)
+
+def generate_expected_route(user_input):
+    """
+    Generate dynamic expected workflow route with agent-level actions
+    based on user query for insurance.
+    """
+    # Define what each agent does
+    agent_actions = {
+        "document_verification_agent": [
+            "Verify user policy ID and personal info",
+            "Validate claim documents",
+            "Check claim details",
+            "Compare claim against rules"
+        ],
+        "eligibility_checker_agent": [
+            "Check policy coverage and validity",
+            "Check eligibility rules for claim"
+        ],
+        "fraud_checker_agent": [
+            "Detect duplicate claims",
+            "Check for inconsistencies",
+            "Verify provider details"
+        ]
+    }
+
+    route = []
+
+    user_input_lower = user_input.lower()
+
+    # Always start with document_verification_agent actions
+    route.append({
+        "agent": "document_verification_agent",
+        "actions": agent_actions["document_verification_agent"]
+    })
+
+    if "submit claim" in user_input_lower:
+        route.append({
+            "agent": "eligibility_checker_agent",
+            "actions": agent_actions["eligibility_checker_agent"]
+        })
+        route.append({
+            "agent": "fraud_checker_agent",
+            "actions": agent_actions["fraud_checker_agent"]
+        })
+        route.append({
+            "agent": "claim_processing_agent",
+            "actions": [
+                "Identify type of claim (e.g., accident, hospitalization)",
+                "Collect relevant claim data (date, amount, medical details)",
+                "Calculate claim eligibility and reimbursement",
+                "Generate claim approval/denial response"
+            ]
+        })
+    elif "claim status" in user_input_lower:
+        route.append({
+            "agent": "claim_status_agent",
+            "actions": [
+                "Identify type of claim",
+                "Fetch claim status",
+                "Generate claim status response"
+            ]
+        })
+    elif "renew policy" in user_input_lower:
+        route.append({
+            "agent": "renewal_agent",
+            "actions": [
+                "Check renewal eligibility",
+                "Generate renewal response"
+            ]
+        })
+    elif "policy details" in user_input_lower:
+        route.append({
+            "agent": "policy_info_agent",
+            "actions": [
+                "Fetch policy details",
+                "Generate policy info response"
+            ]
+        })
+    # else:
+        # route.append({
+        #     "agent": "document_verification_agent",
+        #     "actions": ["Handle general insurance query"]
+        # })
+
+    return route
+
+# Flatten and combine all user messages into a single string
+user_input_str = " ".join(
+    msg.get("message.content", "")
+    for sublist in user_input_list
+    for msg in sublist
+)
+
+# Generate expected route with detailed agent actions
+expected_route_detailed = generate_expected_route(user_input_str)
+
+# Print nicely
+for step in expected_route_detailed:
+    print(f"Agent: {step['agent']}")
+    for action in step['actions']:
+        print(f"  - {action}")
+
+
+# -------------------------------
+# 4. Define Agent Router Prompt
+# -------------------------------
+AGENT_ROUTER_PROMPT = """
+You are an AI evaluator that compares the expected workflow route of an agent with the actual route taken during execution for a medical insurance system.
+
+Rules for generating the expected route:
+1. Always start by verifying the user's policy ID and personal information.
+2. Determine the user's intent based on the input query:
+   - If the user wants to submit a claim:
+       a. Check policy coverage and validity
+       b. Identify type of claim (accident, hospitalization, etc.)
+       c. Collect relevant claim data (date, amount, medical details)
+       d. Calculate claim eligibility and reimbursement
+       e. Generate claim approval/denial response
+   - If the user wants to check claim status:
+       a. Identify type of claim
+       b. Fetch claim status
+       c. Generate claim status response
+   - If the user wants to renew policy:
+       a. Check renewal eligibility
+       b. Generate renewal response
+   - If the user wants policy details:
+       a. Fetch policy details
+       b. Generate policy info response
+   - For any other query:
+       a. Handle as a general insurance query
+
+Inputs:
+1. User Query / Input: {user_input}
+2. Expected Route: {expected_route}
+3. Actual Route Taken by the Agent: {actual_route}
+
+Task:
+- Compare the expected route with the actual route.
+- Identify deviations, missing steps, extra steps, or out-of-order steps.
+- Evaluate the overall adherence to the intended workflow.
+
+Return a structured evaluation including:
+- Route Status: (Correct / Partially Correct / Incorrect)
+- Deviations: List any missing, extra, or misordered steps
+- Justification: Short explanation of the assessment
+- Suggestions: Recommendations to improve route adherence
+"""
+
+# Format prompt
+prompt = AGENT_ROUTER_PROMPT.format(
+    user_input=user_input_str,
+    expected_route=expected_route_detailed,
+    actual_route=actual_route_str
+)
+
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": prompt}],
+    temperature=0.0,
+    max_tokens=512
+)
+
+evaluation = response.choices[0].message.content
+print(evaluation)
+
+# -------------------------------
+# 6. Save results to file
+# -------------------------------
+output_file = r'C:\CoE\agentic ai\agent_router_results.txt'
+with open(output_file, "w", encoding="utf-8") as f:
+    f.write(f"User Input:\n{user_input_str}\n\n")
+    f.write(f"Expected Route:\n{expected_route_detailed}\n\n")
+    f.write(f"Actual Route:\n{actual_route_str}\n\n")
+    f.write(f"Evaluation:\n{evaluation}\n")
+#
+
+
+
